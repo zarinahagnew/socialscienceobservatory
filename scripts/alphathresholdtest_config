@@ -1,0 +1,34 @@
+# Neurosity Crown Alpha Threshold Characterization
+
+Automated protocol for measuring baseline and peak alpha power using the Neurosity Crown EEG headset.
+
+## Setup
+
+1. Install dependencies:
+```bash
+pip3 install neurosity
+```
+
+2. Configure credentials:
+```bash
+cp config.example.py config.py
+# Edit config.py with your Neurosity credentials
+```
+
+3. Run:
+```bash
+python3 threshold_characterization.py
+```
+
+## Protocol
+
+- 4 alternating cycles (20s each)
+- Voice-guided prompts
+- Automatic analysis of alpha power
+- CSV data logging
+
+## Requirements
+
+- Neurosity Crown
+- macOS (for text-to-speech)
+- Python 3.7+
