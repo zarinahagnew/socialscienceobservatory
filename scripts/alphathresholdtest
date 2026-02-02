@@ -1,0 +1,162 @@
+"""
+Alpha Threshold Characterization Protocol
+==========================================
+Automated protocol for measuring baseline and peak alpha power
+using alternating eyes-open/eyes-closed cycles with voice guidance.
+
+Setup:
+1. Copy config.example.py to config.py
+2. Add your Neurosity credentials to config.py
+3. Run: python3 threshold_characterization.py
+"""
+
+import os
+from neurosity import NeurositySDK
+import time
+import csv
+
+# Load credentials (see config.example.py)
+try:
+    from config import DEVICE_ID, EMAIL, PASSWORD
+except ImportError:
+    print("\n⚠️  Missing config.py file!")
+    print("Please create config.py with your Neurosity credentials.")
+    print("See config.example.py for template.\n")
+    exit(1)
+
+sdk = NeurositySDK({"device_id": DEVICE_ID})
+
+# Logging
+log_file = open('alpha_thresholds.csv', 'w')
+logger = csv.writer(log_file)
+logger.writerow(['timestamp', 'condition', 'po3', 'po4', 'parietal_avg'])
+
+def speak(text):
+    """Text-to-speech on macOS"""
+    os.system(f'say "{text}"')
+
+# Alternating 20-second cycles
+conditions = [
+    ("eyes_open_1", "Open your eyes", 20),
+    ("eyes_closed_1", "Close your eyes", 20),
+    ("eyes_open_2", "Open your eyes", 20),
+    ("eyes_closed_2", "Close your eyes", 20),
+]
+
+current_condition = conditions[0][0]
+condition_index = 0
+start_time = time.time()
+
+def on_alpha_power(data):
+    global current_condition, condition_index, start_time
+    
+    try:
+        alpha_array = data['data']['alpha']
+        
+        # DIAGNOSTIC: Show all 8 channels
+        print(f"All channels: {[f'{x:.1f}' for x in alpha_array]}")
+        
+        # Parieto-occipital channels (indices 3, 4)
+        po3 = alpha_array[3]
+        po4 = alpha_array[4]
+        avg = (po3 + po4) / 2
+        
+        elapsed = time.time() - start_time
+        remaining = conditions[condition_index][2] - elapsed
+        
+        logger.writerow([time.time(), current_condition, po3, po4, avg])
+        print(f"{current_condition:15s} | {remaining:4.0f}s | Avg: {avg:6.1f}")
+        
+        # Switch conditions
+        if elapsed >= conditions[condition_index][2]:
+            condition_index += 1
+            if condition_index < len(conditions):
+                current_condition = conditions[condition_index][0]
+                start_time = time.time()
+                
+                print(f"\n{'='*50}")
+                print(f"→ {conditions[condition_index][1]}")
+                print(f"{'='*50}\n")
+                
+                speak(conditions[condition_index][1])
+            else:
+                print("\n✅ Done! Analyzing...")
+                speak("Done")
+                analyze_and_exit()
+        
+    except Exception as e:
+        print(f"Error: {e}")
+
+def analyze_and_exit():
+    """Calculate thresholds and exit"""
+    log_file.close()
+    
+    with open('alpha_thresholds.csv', 'r') as f:
+        lines = f.readlines()[1:]
+    
+    open_values = []
+    closed_values = []
+    
+    for line in lines:
+        parts = line.strip().split(',')
+        condition = parts[1]
+        avg = float(parts[4])
+        
+        if condition.startswith("eyes_open"):
+            open_values.append(avg)
+        elif condition.startswith("eyes_closed"):
+            closed_values.append(avg)
+    
+    if open_values and closed_values:
+        baseline = sum(open_values) / len(open_values)
+        peak = sum(closed_values) / len(closed_values)
+        threshold = baseline * 2.5
+        
+        open_std = (sum((x - baseline)**2 for x in open_values) / len(open_values))**0.5
+        closed_std = (sum((x - peak)**2 for x in closed_values) / len(closed_values))**0.5
+        
+        print("\n" + "="*50)
+        print("📊 THRESHOLD ANALYSIS")
+        print("="*50)
+        print(f"Eyes Open (baseline):  {baseline:.1f} ± {open_std:.1f}")
+        print(f"Eyes Closed (peak):    {peak:.1f} ± {closed_std:.1f}")
+        print(f"Suggested threshold:   {threshold:.1f}")
+        print(f"Contrast ratio:        {peak/baseline:.1f}x")
+        print("="*50)
+        
+        if open_std < baseline * 0.3 and closed_std < peak * 0.3:
+            print("✅ Consistent signal - good quality data!")
+        else:
+            print("⚠️  High variability - check electrode contact")
+        print("="*50)
+    
+    import sys
+    sys.exit(0)
+
+if __name__ == "__main__":
+    sdk.login({
+        "email": EMAIL,
+        "password": PASSWORD
+    })
+    
+    print("\n" + "="*50)
+    print("🧠 ALPHA THRESHOLD CHARACTERIZATION")
+    print("="*50)
+    print(f"4 cycles × 20 seconds = 80 seconds total")
+    print(f"Starting in 3 seconds...")
+    print("="*50 + "\n")
+    
+    time.sleep(3)
+    
+    speak(conditions[0][1])
+    print(f"→ {conditions[0][1]}")
+    print()
+    
+    sdk.brainwaves_power_by_band(on_alpha_power)
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n\nStopped early.")
+        log_file.close()
